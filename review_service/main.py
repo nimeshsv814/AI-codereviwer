@@ -6,6 +6,10 @@ app = FastAPI(title="Review Management Service")
 
 DB_FILE = "reviews.db"
 
+@app.get("/health")
+def health_check():
+    return {"service": "review-service", "status": "ok"}
+
 def init_db():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()

@@ -8,6 +8,10 @@ import io
 
 app = FastAPI(title="AI Service")
 
+@app.get("/health")
+def health_check():
+    return {"service": "ai-service", "status": "ok", "gemini_key_loaded": bool(key)}
+
 def read_env_value(name: str) -> str:
     value = (os.getenv(name) or "").strip().strip("\"'")
     if value:

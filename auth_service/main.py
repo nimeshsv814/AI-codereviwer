@@ -8,6 +8,10 @@ app = FastAPI(title="Auth Service")
 
 DB_FILE = "auth.db"
 
+@app.get("/health")
+def health_check():
+    return {"service": "auth-service", "status": "ok"}
+
 def init_db():
     conn = sqlite3.connect(DB_FILE, check_same_thread=False)
     c = conn.cursor()

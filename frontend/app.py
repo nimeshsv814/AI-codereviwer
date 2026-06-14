@@ -16,6 +16,49 @@ EXECUTION_SERVICE_URL = os.getenv("EXECUTION_SERVICE_URL", "http://localhost:800
 AI_SERVICE_URL = os.getenv("AI_SERVICE_URL", "http://localhost:8003")
 REVIEW_SERVICE_URL = os.getenv("REVIEW_SERVICE_URL", "http://localhost:8004")
 
+MICROSERVICES = [
+    {
+        "name": "Auth Service",
+        "base_url": AUTH_SERVICE_URL,
+        "purpose": "Handles user registration and login.",
+        "endpoints": [
+            ("GET", "/health", "Service health check"),
+            ("POST", "/register", "Create a new user"),
+            ("POST", "/login", "Authenticate an existing user"),
+        ],
+    },
+    {
+        "name": "Execution Service",
+        "base_url": EXECUTION_SERVICE_URL,
+        "purpose": "Runs submitted Python code and returns output.",
+        "endpoints": [
+            ("GET", "/health", "Service health check"),
+            ("POST", "/run", "Execute Python code"),
+        ],
+    },
+    {
+        "name": "AI Service",
+        "base_url": AI_SERVICE_URL,
+        "purpose": "Uses Gemini for code review and image-to-code extraction.",
+        "endpoints": [
+            ("GET", "/health", "Service health check"),
+            ("POST", "/review", "Review source code"),
+            ("POST", "/extract", "Extract code from an uploaded image"),
+        ],
+    },
+    {
+        "name": "Review Service",
+        "base_url": REVIEW_SERVICE_URL,
+        "purpose": "Stores and retrieves user review history.",
+        "endpoints": [
+            ("GET", "/health", "Service health check"),
+            ("GET", "/reviews/{username}", "Get saved reviews for a user"),
+            ("POST", "/reviews/{username}", "Save or update a review"),
+            ("DELETE", "/reviews/{tab_id}", "Delete a saved review"),
+        ],
+    },
+]
+
 
 def is_valid_python_code(text):
     try:
@@ -148,6 +191,16 @@ def review_code(code, tab_id):
         st.error(f"Error during code review: {str(e)}")
 
 
+def check_service_health(base_url):
+    try:
+        response = requests.get(f"{base_url}/health", timeout=3)
+        if response.status_code == 200:
+            return True, response.json()
+        return False, {"status_code": response.status_code, "body": response.text}
+    except requests.RequestException as e:
+        return False, {"error": str(e)}
+
+
 def get_sorted_tabs():
     return dict(
         sorted(
@@ -180,7 +233,7 @@ def show_sidebar():
     with st.sidebar:
         st.title("Code Raptor")
 
-        for page in ["Review", "Login/Register", "About"]:
+        for page in ["Review", "Login/Register", "Microservices", "About"]:
             if st.button(page, use_container_width=True):
                 st.session_state["page"] = page
                 st.rerun()
@@ -243,6 +296,53 @@ def show_about_page():
         - Review service: history storage.
         """
     )
+
+
+def show_microservices_page():
+    st.title("Microservices")
+    st.write("Each backend service runs as a separate container and exposes endpoint paths over HTTP.")
+
+    overview_rows = [
+        {
+            "Service": service["name"],
+            "Base URL": service["base_url"],
+            "Health": f'{service["base_url"]}/health',
+            "Docs": f'{service["base_url"]}/docs',
+        }
+        for service in MICROSERVICES
+    ]
+    st.dataframe(overview_rows, use_container_width=True, hide_index=True)
+
+    tabs = st.tabs([service["name"] for service in MICROSERVICES])
+    for tab, service in zip(tabs, MICROSERVICES):
+        with tab:
+            st.subheader(service["name"])
+            st.write(service["purpose"])
+            st.code(service["base_url"], language="text")
+
+            if st.button("Check Service", key=f"health_{service['name']}"):
+                is_healthy, payload = check_service_health(service["base_url"])
+                if is_healthy:
+                    st.success("Service is reachable.")
+                else:
+                    st.error("Service is not reachable.")
+                st.json(payload)
+
+            st.markdown("#### Endpoint Paths")
+            endpoint_rows = [
+                {"Method": method, "Path": path, "Use": description}
+                for method, path, description in service["endpoints"]
+            ]
+            st.dataframe(endpoint_rows, use_container_width=True, hide_index=True)
+
+            st.markdown("#### FastAPI Routes")
+            st.code(
+                "\n".join(
+                    f"{method:6} {service['base_url']}{path}"
+                    for method, path, _ in service["endpoints"]
+                ),
+                language="text",
+            )
 
 
 def show_auth_page():
@@ -407,5 +507,7 @@ if st.session_state["page"] == "About":
     show_about_page()
 elif st.session_state["page"] == "Login/Register":
     show_auth_page()
+elif st.session_state["page"] == "Microservices":
+    show_microservices_page()
 else:
     show_review_page()

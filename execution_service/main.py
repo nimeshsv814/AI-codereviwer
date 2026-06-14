@@ -7,6 +7,10 @@ import os
 
 app = FastAPI(title="Execution Service")
 
+@app.get("/health")
+def health_check():
+    return {"service": "execution-service", "status": "ok"}
+
 class CodeRequest(BaseModel):
     code: str
     tab_id: str
