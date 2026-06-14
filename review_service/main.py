@@ -1,28 +1,37 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import sqlite3
+import os
+import time
+import psycopg2
 
 app = FastAPI(title="Review Management Service")
 
-DB_FILE = "reviews.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://coderaptor:coderaptor@postgres:5432/coderaptor")
 
 @app.get("/health")
 def health_check():
     return {"service": "review-service", "status": "ok"}
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS reviews
-                 (id TEXT PRIMARY KEY,
-                  username TEXT,
-                  code TEXT,
-                  review_output TEXT,
-                  run_output TEXT,
-                  fixed_code TEXT,
-                  timestamp TEXT)''')
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''CREATE TABLE IF NOT EXISTS reviews
+                           (id TEXT PRIMARY KEY,
+                            username TEXT NOT NULL,
+                            code TEXT,
+                            review_output TEXT,
+                            run_output TEXT,
+                            fixed_code TEXT,
+                            timestamp TEXT)''')
+        conn.commit()
+
+def get_db_connection():
+    for _ in range(10):
+        try:
+            return psycopg2.connect(DATABASE_URL)
+        except psycopg2.OperationalError:
+            time.sleep(2)
+    return psycopg2.connect(DATABASE_URL)
 
 # Initialize DB on startup
 init_db()
@@ -37,12 +46,11 @@ class ReviewData(BaseModel):
 
 @app.get("/reviews/{username}")
 def get_reviews(username: str):
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    c = conn.cursor()
-    c.execute('''SELECT id, code, review_output, run_output, fixed_code, timestamp 
-                 FROM reviews WHERE username=? ORDER BY timestamp DESC''', (username,))
-    reviews = c.fetchall()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''SELECT id, code, review_output, run_output, fixed_code, timestamp
+                           FROM reviews WHERE username=%s ORDER BY timestamp DESC''', (username,))
+            reviews = cur.fetchall()
     
     tabs = {}
     for review in reviews:
@@ -58,22 +66,28 @@ def get_reviews(username: str):
 
 @app.post("/reviews/{username}")
 def save_review(username: str, review: ReviewData):
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    c = conn.cursor()
-    c.execute('''INSERT OR REPLACE INTO reviews 
-                 VALUES (?, ?, ?, ?, ?, ?, ?)''',
-              (review.id, username, review.code, 
-               review.review_output, review.run_output,
-               review.fixed_code, review.timestamp))
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''INSERT INTO reviews
+                           (id, username, code, review_output, run_output, fixed_code, timestamp)
+                           VALUES (%s, %s, %s, %s, %s, %s, %s)
+                           ON CONFLICT (id) DO UPDATE SET
+                           username = EXCLUDED.username,
+                           code = EXCLUDED.code,
+                           review_output = EXCLUDED.review_output,
+                           run_output = EXCLUDED.run_output,
+                           fixed_code = EXCLUDED.fixed_code,
+                           timestamp = EXCLUDED.timestamp''',
+                        (review.id, username, review.code,
+                         review.review_output, review.run_output,
+                         review.fixed_code, review.timestamp))
+        conn.commit()
     return {"message": "Review saved"}
 
 @app.delete("/reviews/{tab_id}")
 def delete_review(tab_id: str):
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    c = conn.cursor()
-    c.execute('DELETE FROM reviews WHERE id=?', (tab_id,))
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('DELETE FROM reviews WHERE id=%s', (tab_id,))
+        conn.commit()
     return {"message": "Review deleted"}

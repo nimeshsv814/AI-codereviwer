@@ -1,11 +1,33 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-coderaptor}
+      - POSTGRES_USER=${POSTGRES_USER:-coderaptor}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-coderaptor}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   auth-service:
     build: ./auth_service
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     expose:
       - "8001"
     ports:
       - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-coderaptor}:${POSTGRES_PASSWORD:-coderaptor}@postgres:5432/${POSTGRES_DB:-coderaptor}
     volumes:
       - ./auth_service:/app
 
@@ -34,10 +56,15 @@ services:
   review-service:
     build: ./review_service
     restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
     expose:
       - "8004"
     ports:
       - "8004:8004"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-coderaptor}:${POSTGRES_PASSWORD:-coderaptor}@postgres:5432/${POSTGRES_DB:-coderaptor}
     volumes:
       - ./review_service:/app
 
@@ -58,3 +85,6 @@ services:
       - "8501:8501"
     volumes:
       - ./frontend:/app
+
+volumes:
+  postgres_data:

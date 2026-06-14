@@ -1,29 +1,35 @@
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, EmailStr
-import sqlite3
 import hashlib
 import os
+import time
+import psycopg2
+from psycopg2 import errors
 
 app = FastAPI(title="Auth Service")
 
-DB_FILE = "auth.db"
+DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://coderaptor:coderaptor@postgres:5432/coderaptor")
 
 @app.get("/health")
 def health_check():
     return {"service": "auth-service", "status": "ok"}
 
 def init_db():
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    c = conn.cursor()
-    c.execute('''CREATE TABLE IF NOT EXISTS users
-                 (username TEXT PRIMARY KEY, email TEXT UNIQUE, password TEXT)''')
-    c.execute("PRAGMA table_info(users)")
-    columns = [column[1] for column in c.fetchall()]
-    if "email" not in columns:
-        c.execute("ALTER TABLE users ADD COLUMN email TEXT")
-        c.execute("UPDATE users SET email = username WHERE email IS NULL OR email = ''")
-    conn.commit()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('''CREATE TABLE IF NOT EXISTS users
+                           (username TEXT PRIMARY KEY,
+                            email TEXT UNIQUE NOT NULL,
+                            password TEXT NOT NULL)''')
+        conn.commit()
+
+def get_db_connection():
+    for _ in range(10):
+        try:
+            return psycopg2.connect(DATABASE_URL)
+        except psycopg2.OperationalError:
+            time.sleep(2)
+    return psycopg2.connect(DATABASE_URL)
 
 # Initialize DB on startup
 init_db()
@@ -46,25 +52,24 @@ def register_user(user: UserRegister):
     if not user.username or not user.email or not user.password:
         raise HTTPException(status_code=400, detail="Username, email, and password required")
     
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    c = conn.cursor()
     try:
-        c.execute('INSERT INTO users (username, email, password) VALUES (?, ?, ?)',
-                 (user.username, str(user.email), hash_password(user.password)))
-        conn.commit()
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    'INSERT INTO users (username, email, password) VALUES (%s, %s, %s)',
+                    (user.username, str(user.email), hash_password(user.password)),
+                )
+            conn.commit()
         return {"message": "Registration successful"}
-    except sqlite3.IntegrityError:
+    except errors.UniqueViolation:
         raise HTTPException(status_code=400, detail="Username or email already exists")
-    finally:
-        conn.close()
 
 @app.post("/login")
 def login(user: UserAuth):
-    conn = sqlite3.connect(DB_FILE, check_same_thread=False)
-    c = conn.cursor()
-    c.execute('SELECT username, password FROM users WHERE email=?', (str(user.email),))
-    result = c.fetchone()
-    conn.close()
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute('SELECT username, password FROM users WHERE email=%s', (str(user.email),))
+            result = cur.fetchone()
     
     if result and result[1] == hash_password(user.password):
         # In a full production system, return a JWT token here
