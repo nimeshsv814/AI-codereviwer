@@ -26,11 +26,10 @@ services:
       - "8003"
     ports:
       - "8003:8003"
-    env_file:
-      - ./.env
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY:?Set GEMINI_API_KEY before running docker compose}
     volumes:
       - ./ai_service:/app
-      - ./.env:/app/.env:ro
 
   review-service:
     build: ./review_service
