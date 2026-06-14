@@ -229,43 +229,63 @@ def apply_fixed_code(tab_id):
             save_review(st.session_state["username"], tab_id, st.session_state["tabs"][tab_id])
 
 
-def show_sidebar():
-    with st.sidebar:
-        st.title("Code Raptor")
+def logout_user():
+    st.session_state["username"] = None
+    st.session_state["tabs"] = {}
+    create_new_tab()
+    st.session_state["page"] = "Login/Register"
 
-        for page in ["Review", "Login/Register", "Microservices", "About"]:
-            if st.button(page, use_container_width=True):
-                st.session_state["page"] = page
-                st.rerun()
 
-        st.divider()
-        if st.session_state.get("username"):
-            st.caption(f"Logged in as {st.session_state['username']}")
-        else:
-            st.caption("Not logged in")
+def show_top_navigation():
+    st.title("Code Raptor")
+    nav_col1, nav_col2, nav_col3, nav_col4, nav_col5 = st.columns([2, 2, 2, 3, 1])
 
-        st.divider()
-        st.subheader("Review History")
-        if st.button("New Review", type="primary", use_container_width=True):
-            create_new_tab()
+    with nav_col1:
+        if st.button("Code Review", use_container_width=True):
             st.session_state["page"] = "Review"
             st.rerun()
+    with nav_col2:
+        if st.button("Microservices", use_container_width=True):
+            st.session_state["page"] = "Microservices"
+            st.rerun()
+    with nav_col3:
+        if st.button("About", use_container_width=True):
+            st.session_state["page"] = "About"
+            st.rerun()
+    with nav_col4:
+        st.write(f"Logged in as **{st.session_state['username']}**")
+    with nav_col5:
+        if st.button("Logout", use_container_width=True):
+            logout_user()
+            st.rerun()
 
-        for tab_id, tab_data in get_sorted_tabs().items():
-            col1, col2 = st.columns([4, 1])
-            with col1:
-                if st.button(
-                    f"Review from {tab_data['timestamp']}",
-                    key=f"history_{tab_id}",
-                    use_container_width=True,
-                ):
-                    st.session_state["current_tab"] = tab_id
-                    st.session_state["page"] = "Review"
-                    st.rerun()
-            with col2:
-                if st.button("X", key=f"delete_{tab_id}"):
-                    delete_tab(tab_id)
-                    st.rerun()
+    st.divider()
+
+
+def show_review_history_bar():
+    st.subheader("Review History")
+    col1, col2 = st.columns([1, 4])
+
+    with col1:
+        if st.button("New Review", type="primary", use_container_width=True):
+            create_new_tab()
+            st.rerun()
+
+    with col2:
+        sorted_tabs = get_sorted_tabs()
+        if not sorted_tabs:
+            st.caption("No saved reviews yet.")
+            return
+
+        labels = {
+            f"Review from {tab_data['timestamp']}": tab_id
+            for tab_id, tab_data in sorted_tabs.items()
+        }
+        selected_label = st.selectbox("Open previous review", list(labels.keys()), label_visibility="collapsed")
+        selected_tab = labels[selected_label]
+        if selected_tab != st.session_state.get("current_tab"):
+            st.session_state["current_tab"] = selected_tab
+            st.rerun()
 
 
 def show_about_page():
@@ -349,13 +369,8 @@ def show_auth_page():
     st.title("Login / Register")
 
     if st.session_state.get("username"):
-        st.success(f"Logged in as {st.session_state['username']}")
-        if st.button("Logout", type="primary"):
-            st.session_state["username"] = None
-            st.session_state["tabs"] = {}
-            create_new_tab()
-            st.session_state["page"] = "Review"
-            st.rerun()
+        st.session_state["page"] = "Review"
+        st.rerun()
         return
 
     login_tab, register_tab = st.tabs(["Login", "Register"])
@@ -449,6 +464,8 @@ def show_review_page():
     current_tab, current_tab_data = get_current_tab_data()
 
     st.title("Code Review")
+    show_review_history_bar()
+
     code = st_ace(
         language="python",
         theme="monokai",
@@ -501,13 +518,16 @@ def show_review_page():
 
 
 init_session_state()
-show_sidebar()
 
-if st.session_state["page"] == "About":
-    show_about_page()
-elif st.session_state["page"] == "Login/Register":
+if not st.session_state.get("username"):
+    st.session_state["page"] = "Login/Register"
     show_auth_page()
-elif st.session_state["page"] == "Microservices":
-    show_microservices_page()
 else:
-    show_review_page()
+    show_top_navigation()
+
+    if st.session_state["page"] == "About":
+        show_about_page()
+    elif st.session_state["page"] == "Microservices":
+        show_microservices_page()
+    else:
+        show_review_page()
